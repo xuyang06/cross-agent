@@ -1,6 +1,6 @@
 ---
 name: cross-agent
-description: Run Claude Code and Codex together on one repo — shared instructions and skills, plus the three handoff patterns (cross-agent review, sequential plan→implement, parallel race) and the failure modes that actually bite. Use when setting up two agents on a project, dispatching work to a second agent, or reviewing a diff a different agent wrote.
+description: Run Claude Code and Codex together on one repo — shared instructions, a shared decision log, the three handoff patterns (cross-agent review, sequential plan→implement, parallel race), and eight failure modes with fixes. Covers why agent memory is private and asymmetric, and why anything that must hold belongs in a test rather than an instruction. Use when setting up two agents on a project, dispatching work to a second agent, or reviewing a diff a different agent wrote.
 ---
 
 # Working with a second agent
@@ -8,8 +8,12 @@ description: Run Claude Code and Codex together on one repo — shared instructi
 Two agents are worth the trouble for exactly one reason: **an agent reviewing work it did not
 write has no stake in it.** Everything else here is logistics around protecting that property.
 
-If you only take one rule: **the reviewer must not be able to write.** A reviewer that can
-edit will quietly fix things instead of telling you about them, and you lose the finding.
+Two rules carry most of the value:
+
+1. **The reviewer must not be able to write.** A reviewer that can edit will quietly fix
+   things instead of telling you about them, and you lose the finding.
+2. **If a rule matters, write the test, not the instruction.** Instructions are advisory and
+   the other agent starts every run cold. A test binds both agents and you.
 
 ---
 
@@ -27,11 +31,82 @@ thin adapters, nothing else.
 Codex and Copilot read `AGENTS.md` and `.agents/skills/` natively. Claude Code reads
 `CLAUDE.md` and `.claude/skills/`. The adapters make one source serve all three.
 
+### The import is not optional, and its failure is silent
+
+Claude Code *can* read `AGENTS.md` directly, but **only when no `CLAUDE.md` exists in the
+working directory or above it.** If the repo has a `CLAUDE.md` — most do — then `AGENTS.md`
+is ignored unless that file imports it. Direct reading also needs a recent version; the
+import works regardless, which is why it is the layout above.
+
+**The failure mode is the dangerous part.** If the import line is deleted, renamed, or
+wrapped in backticks, Claude loads `CLAUDE.md` alone and quietly loses every shared
+instruction. Nothing errors. No output changes. You find out weeks later from a session that
+behaves oddly.
+
+So do not leave it to inspection. Assert it, and parse the way the importer does — it skips
+fenced blocks and code spans, so a naive substring check passes on an import that never
+loads:
+
+```python
+body = re.sub(r"`[^`\n]*`", "", re.sub(r"```.*?```", "", text, flags=re.S))
+assert re.search(r"^@AGENTS\.md\s*$", body, flags=re.M)
+```
+
+**Split by audience, not by convenience.** If your `CLAUDE.md` already holds real project
+knowledge, moving a token file into `AGENTS.md` and leaving the content behind gives the
+other agent nothing. Shared knowledge goes in `AGENTS.md`; only what has no counterpart in
+the other tool — slash-command routing, Claude-specific subagents — stays in the adapter.
+
 **Stays tool-specific and cannot be shared:** subagent definitions, hooks, path-scoped rules,
 permission settings. Do not fight this — reference the shared instructions from inside them.
 
 `install.sh` in this repo writes the adapters into a target repo without clobbering existing
 content.
+
+---
+
+## 1b. Shared state: agent memory is private and asymmetric
+
+Sharing instructions is the easy half. **Decisions are the half that rots.**
+
+Claude Code accumulates durable state across sessions — auto memory, and whatever your
+tooling logs. Codex has none: every `codex exec` starts cold with only the files in the repo.
+Neither can read the other's store. So a decision recorded in one agent's memory is one the
+other will unknowingly relitigate or contradict.
+
+In the project these notes come from, **20 logged decisions sat outside the repo** where the
+second agent could not see them. The sharpest example was a memory file recording *how to
+work with Codex* — which Codex could not read.
+
+**Keep a `DECISIONS.md` in the repo.** Newest first, append-only, never edited — supersede an
+entry and say what it replaces. Record durable calls only: architecture, scope, a tool or
+vendor choice, a reversal, or a rule that binds future work.
+
+The test for whether something belongs: *would an agent six weeks from now waste an hour, or
+do the wrong thing, for not knowing this?*
+
+`git log` is the other shared channel and is underrated — both agents can read it, and a
+detailed commit message is a decision record that costs nothing extra.
+
+---
+
+## 1c. Instructions are advisory. Enforcement lives in the repo.
+
+Everything above is a request an agent can skip, and nothing notices when it does. Asking the
+other agent to *remember* a rule fails by construction: it starts every run cold.
+
+**If a rule matters, write the test.** Both agents run the suite, so a test binds both of them
+and you. Decisions worth keeping become assertions:
+
+| Decision | Enforced as |
+|---|---|
+| This package stays framework-free | a test that imports it and fails on the dependency |
+| The public page serves X, never Y | a test asserting the served content |
+| Colour lives in tokens, not literals | a test scanning for raw hex outside the token block |
+| The shared instructions are actually loaded | the import test above |
+
+A hook can enforce more for one vendor, but a test is the only mechanism that binds every
+agent and every human without configuration on either side.
 
 ---
 
@@ -128,7 +203,17 @@ compile error. **Both would have let a "verified" claim be made on no evidence.*
 **Fix:** after mutating, confirm the mutation *applied* and that the failure is an assertion
 failure, not a build error. Then restore and confirm green.
 
-### 7. Patching does not always converge
+### 7. A broken config fails silently, not loudly
+
+An import that stops resolving, a skill stub pointing at a moved file, a rule that only ever
+lived in one agent's private memory — none of these raise an error. The agent simply proceeds
+without the context, competently and wrongly, and the first symptom is work that ignores a
+rule you thought was in force.
+
+**Fix:** every piece of shared config gets an assertion. If you cannot see it fail, you cannot
+tell it is working. See 1c.
+
+### 8. Patching does not always converge
 
 Six review rounds on one document: 7 findings, then 6, then 10, then 1, then 8, then 6 —
 with roughly one new defect introduced per round of repairs. The count of claims fell 21 → 16

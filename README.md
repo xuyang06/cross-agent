@@ -31,9 +31,9 @@ Codex and Copilot read `AGENTS.md` and `.agents/` natively; Claude Code reads `C
 
 This repo is laid out the same way, so it demonstrates what it documents.
 
-## The one rule
+## Two rules
 
-**The reviewer must not be able to write.**
+**1. The reviewer must not be able to write.**
 
 ```bash
 codex exec --sandbox read-only "$(cat review-brief.md)" < /dev/null
@@ -42,11 +42,36 @@ codex exec --sandbox read-only "$(cat review-brief.md)" < /dev/null
 A reviewer that can edit will quietly fix things instead of telling you about them, and you
 lose the finding. The sandbox flag is what makes a review a review.
 
+**2. If a rule matters, write the test, not the instruction.**
+
+Instructions to an agent are advisory, and the other agent starts every run cold — asking it
+to *remember* a rule fails by construction. A test binds both agents and you. Decisions worth
+keeping become assertions:
+
+| Decision | Enforced as |
+|---|---|
+| This package stays framework-free | a test that imports it and fails on the dependency |
+| The public page serves X, never Y | a test asserting the served content |
+| The shared instructions are actually loaded | an import test that parses like the importer |
+
 ## What is actually in here
 
-The two source articles cover the setup and the patterns well. What this adds is **seven
-failure modes with numbers attached**, from running the setup through six adversarial review
-rounds on a real project:
+The two source articles cover the setup and the patterns well. What this adds:
+
+**A correction to the simple advice.** Claude Code reads `AGENTS.md` natively *only when no
+`CLAUDE.md` exists* in the working directory or above. Most repos have one, so `AGENTS.md` is
+silently ignored unless that file imports it — and if the import breaks, Claude loads nothing
+and nothing errors. Split by audience too: moving a token `AGENTS.md` into place while the
+real knowledge stays in `CLAUDE.md` gives the other agent nothing.
+
+**The half nobody documents: shared state.** Claude accumulates memory across sessions; Codex
+has none and starts every run cold; neither can read the other's. A decision in one agent's
+store is one the other will relitigate. Keep a `DECISIONS.md` in the repo — in the project
+these notes come from, 20 logged decisions sat where the second agent could not see them,
+including a memory file about *how to work with Codex*.
+
+**Eight failure modes with numbers attached**, from six adversarial review rounds on a real
+project:
 
 - Two agents in one directory produce **phantom findings** — a reviewer reading a file
   mid-write reported a defect that was already fixed
@@ -57,6 +82,8 @@ rounds on a real project:
 - Truncated grep output hid the exact defect being hunted
 - A guard that passes is not a guard that works — three attempts to mutation-test one check,
   two of which would have permitted a false "verified"
+- A broken config fails silently — no error, no output change, just work that ignores a rule
+  you thought was in force
 - Patching does not always converge: six rounds, roughly one new defect per round of repairs
 
 Full detail with fixes in [`.agents/skills/cross-agent/SKILL.md`](.agents/skills/cross-agent/SKILL.md).
