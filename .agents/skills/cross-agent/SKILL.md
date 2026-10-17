@@ -25,7 +25,7 @@ thin adapters, nothing else.
 | What | Canonical | Adapter |
 |---|---|---|
 | Instructions | `AGENTS.md` (repo root) | `CLAUDE.md` containing one line: `@AGENTS.md` |
-| Skills | `.agents/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` — frontmatter + `@../../../.agents/skills/<name>/SKILL.md` |
+| Skills | `.agents/skills/<name>/` | `.claude/skills/<name>` — a symlink to `../../.agents/skills/<name>` |
 | MCP servers | `.mcp.json` (repo root) | `.codex/config.toml` `[mcp_servers]` mirror |
 
 Codex and Copilot read `AGENTS.md` and `.agents/skills/` natively. Claude Code reads
@@ -52,6 +52,18 @@ body = re.sub(r"`[^`\n]*`", "", re.sub(r"```.*?```", "", text, flags=re.S))
 assert re.search(r"^@AGENTS\.md\s*$", body, flags=re.M)
 ```
 
+`check_shared_config.py` next to this file runs that assertion plus the skill check below.
+Run it from the repo root, in CI or a test.
+
+### A skill stub does not import
+
+`@path` expands in `CLAUDE.md` and `AGENTS.md`, **not in `SKILL.md`**. A Claude skill stub
+whose body is `@../../../.agents/skills/<name>/SKILL.md` loads as that literal line: Claude
+gets the frontmatter and a path, and has to decide on its own to open it. Its description is
+also a second copy that drifts from the canonical one. Symlink the skill directory instead;
+Claude Code follows symlinked project skills, and there is one file to edit. On Windows,
+clone with `core.symlinks` enabled or the link checks out as a one-line text file.
+
 **Split by audience, not by convenience.** If your `CLAUDE.md` already holds real project
 knowledge, moving a token file into `AGENTS.md` and leaving the content behind gives the
 other agent nothing. Shared knowledge goes in `AGENTS.md`; only what has no counterpart in
@@ -70,8 +82,8 @@ content.
 Sharing instructions is the easy half. **Decisions are the half that rots.**
 
 Claude Code accumulates durable state across sessions — auto memory, and whatever your
-tooling logs. Codex has none: every `codex exec` starts cold with only the files in the repo.
-Neither can read the other's store. So a decision recorded in one agent's memory is one the
+tooling logs. Codex's `memories` feature is off by default, so a typical `codex exec` starts
+cold with only the files in the repo. Turned on or not, neither can read the other's store. So a decision recorded in one agent's memory is one the
 other will unknowingly relitigate or contradict.
 
 In the project these notes come from, **20 logged decisions sat outside the repo** where the
@@ -205,7 +217,7 @@ failure, not a build error. Then restore and confirm green.
 
 ### 7. A broken config fails silently, not loudly
 
-An import that stops resolving, a skill stub pointing at a moved file, a rule that only ever
+An import that stops resolving, a skill stub whose `@` import was never expanded, a rule that only ever
 lived in one agent's private memory — none of these raise an error. The agent simply proceeds
 without the context, competently and wrongly, and the first symptom is work that ignores a
 rule you thought was in force.
@@ -231,7 +243,7 @@ cannot carry. Cut the scope instead of patching again.
 timeout is killed with nothing committed.
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox "$(cat brief.md)" < /dev/null > run.log 2>&1 &
+codex exec --sandbox workspace-write "$(cat brief.md)" < /dev/null > run.log 2>&1 &
 ```
 
 `< /dev/null` matters — without stdin closed, the agent may wait for input that never comes.
@@ -241,9 +253,11 @@ codex exec --dangerously-bypass-approvals-and-sandbox "$(cat brief.md)" < /dev/n
 | Role | Flag |
 |---|---|
 | Reviewer | `--sandbox read-only` |
-| Implementer | `--dangerously-bypass-approvals-and-sandbox` |
+| Implementer | `--sandbox workspace-write` |
+| Implementer, inside a container or VM you already isolate | `--dangerously-bypass-approvals-and-sandbox` |
 
-The reviewer flag is not a formality. It is what makes the review a review.
+The reviewer flag is not a formality. It is what makes the review a review. The bypass flag
+is the opposite: Codex's own help reserves it for externally sandboxed environments.
 
 **Ask for disagreement explicitly.** Briefs should say: *if this is fine, say so plainly; do
 not manufacture findings to appear rigorous, and do not soften to be agreeable.* Without it

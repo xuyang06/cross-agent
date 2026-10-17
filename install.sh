@@ -23,16 +23,24 @@ fi
 
 say() { printf '  %s\n' "$1"; }
 
-# 1. The canonical skill.
+# 1. The canonical skill, with its config check.
 mkdir -p "$TARGET/.agents/skills/cross-agent"
-cp "$SRC/.agents/skills/cross-agent/SKILL.md" "$TARGET/.agents/skills/cross-agent/SKILL.md"
-say "installed .agents/skills/cross-agent/SKILL.md"
+cp "$SRC/.agents/skills/cross-agent/"* "$TARGET/.agents/skills/cross-agent/"
+say "installed .agents/skills/cross-agent/"
 
-# 2. The Claude Code adapter. Thin on purpose — a second copy of the content is
-#    the drift bug the skill itself warns about.
-mkdir -p "$TARGET/.claude/skills/cross-agent"
-cp "$SRC/.claude/skills/cross-agent/SKILL.md" "$TARGET/.claude/skills/cross-agent/SKILL.md"
-say "installed .claude/skills/cross-agent/SKILL.md (adapter)"
+# 2. The Claude Code adapter: a symlink. Claude does not expand @ imports in
+#    SKILL.md, and a copied file is the drift bug the skill warns about.
+LINK="$TARGET/.claude/skills/cross-agent"
+if [ -L "$LINK" ]; then
+  say ".claude/skills/cross-agent already a symlink, left alone"
+elif [ -e "$LINK" ]; then
+  say ".claude/skills/cross-agent exists and is not a symlink, left alone —"
+  say "      replace it: ln -s ../../.agents/skills/cross-agent .claude/skills/cross-agent"
+else
+  mkdir -p "$TARGET/.claude/skills"
+  ln -s ../../.agents/skills/cross-agent "$LINK"
+  say "linked .claude/skills/cross-agent -> .agents/skills/cross-agent"
+fi
 
 # 3. AGENTS.md — create only. Yours is yours.
 if [ -e "$TARGET/AGENTS.md" ]; then
@@ -52,6 +60,7 @@ and Copilot read it directly. Edit here, never in the adapters.
 - **Fix the document, not the passage.** When something is withdrawn, grep for what it named
   across the repo and fix every hit in the same commit.
 
+Before committing, run `python3 .agents/skills/cross-agent/check_shared_config.py`.
 See `.agents/skills/cross-agent/SKILL.md` for the handoff patterns and failure modes.
 EOF
   say "created AGENTS.md"
@@ -76,5 +85,12 @@ if [ -e "$TARGET/.mcp.json" ] && [ ! -e "$TARGET/.codex/config.toml" ]; then
   say "      Codex needs the same servers mirrored under [mcp_servers] in TOML"
 fi
 
+# 6. Prove it loads. A grep for @AGENTS.md above also matches one inside a code
+#    fence, which Claude skips; the check parses like the importer.
 echo
-say "done. Next: read .agents/skills/cross-agent/SKILL.md before dispatching anything."
+if python3 "$TARGET/.agents/skills/cross-agent/check_shared_config.py" "$TARGET"; then
+  say "done. Next: read .agents/skills/cross-agent/SKILL.md before dispatching anything."
+else
+  say "installed, but the shared config will not load as-is — fix the FAIL lines above"
+  exit 1
+fi

@@ -10,7 +10,10 @@ shared context, three handoff patterns, and the failure modes that actually bite
 
 The repo also demonstrates the layout it documents — canonical content in `.agents/`, thin
 adapters in `.claude/`. If you change the skill, change `.agents/skills/cross-agent/SKILL.md`.
-The `.claude/` copy is a pointer and should stay one.
+`.claude/skills/cross-agent` is a symlink to it and should stay one — Claude does not expand
+`@` imports inside `SKILL.md`, so a stub loads as a bare path.
+
+Before committing, run `python3 .agents/skills/cross-agent/check_shared_config.py`.
 
 ## House rules
 

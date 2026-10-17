@@ -23,7 +23,7 @@ One canonical source, thin vendor adapters:
 | What | Canonical | Adapter |
 |---|---|---|
 | Instructions | `AGENTS.md` | `CLAUDE.md` → one line, `@AGENTS.md` |
-| Skills | `.agents/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` → pointer |
+| Skills | `.agents/skills/<name>/` | `.claude/skills/<name>` → symlink |
 | MCP servers | `.mcp.json` | `.codex/config.toml` `[mcp_servers]` |
 
 Codex and Copilot read `AGENTS.md` and `.agents/` natively; Claude Code reads `CLAUDE.md` and
@@ -52,7 +52,7 @@ keeping become assertions:
 |---|---|
 | This package stays framework-free | a test that imports it and fails on the dependency |
 | The public page serves X, never Y | a test asserting the served content |
-| The shared instructions are actually loaded | an import test that parses like the importer |
+| The shared instructions are actually loaded | `check_shared_config.py`, shipped with the skill |
 
 ## What is actually in here
 
@@ -64,8 +64,8 @@ silently ignored unless that file imports it — and if the import breaks, Claud
 and nothing errors. Split by audience too: moving a token `AGENTS.md` into place while the
 real knowledge stays in `CLAUDE.md` gives the other agent nothing.
 
-**The half nobody documents: shared state.** Claude accumulates memory across sessions; Codex
-has none and starts every run cold; neither can read the other's. A decision in one agent's
+**The half nobody documents: shared state.** Claude accumulates memory across sessions; Codex's
+memory is off by default, so it starts cold; neither can read the other's. A decision in one agent's
 store is one the other will relitigate. Keep a `DECISIONS.md` in the repo — in the project
 these notes come from, 20 logged decisions sat where the second agent could not see them,
 including a memory file about *how to work with Codex*.
