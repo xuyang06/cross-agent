@@ -14,7 +14,15 @@ cd cross-agent && ./install.sh /path/to/your/repo
 ```
 
 Idempotent and non-destructive — it never overwrites an existing `AGENTS.md` or `CLAUDE.md`,
-and tells you what it skipped.
+and tells you what it skipped. It ends by running the config check, and exits non-zero if
+either agent would miss the shared files.
+
+Check any repo, existing or new, at any time:
+
+```bash
+python3 .agents/skills/cross-agent/check_shared_config.py          # static, offline
+python3 .agents/skills/cross-agent/check_shared_config.py --live   # asks claude and codex
+```
 
 ## What it sets up
 

@@ -52,8 +52,11 @@ body = re.sub(r"`[^`\n]*`", "", re.sub(r"```.*?```", "", text, flags=re.S))
 assert re.search(r"^@AGENTS\.md\s*$", body, flags=re.M)
 ```
 
-`check_shared_config.py` next to this file runs that assertion plus the skill check below.
-Run it from the repo root, in CI or a test.
+`check_shared_config.py` next to this file runs that assertion plus the other silent
+breakages: a skill stub instead of a symlink, an absolute symlink, an `AGENTS.override.md`
+(Codex reads it instead of `AGENTS.md`; Claude does not), an `AGENTS.md` over Codex's 32 KiB
+read limit, and shared files that `.gitignore` keeps out of clones. Run it from the repo root,
+in CI or a test. Add `--live` to ask the real `claude` and `codex` what they actually loaded.
 
 ### A skill stub does not import
 

@@ -25,7 +25,7 @@ say() { printf '  %s\n' "$1"; }
 
 # 1. The canonical skill, with its config check.
 mkdir -p "$TARGET/.agents/skills/cross-agent"
-cp "$SRC/.agents/skills/cross-agent/"* "$TARGET/.agents/skills/cross-agent/"
+cp "$SRC/.agents/skills/cross-agent/"{SKILL.md,check_shared_config.py} "$TARGET/.agents/skills/cross-agent/"
 say "installed .agents/skills/cross-agent/"
 
 # 2. The Claude Code adapter: a symlink. Claude does not expand @ imports in
