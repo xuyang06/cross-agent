@@ -1,6 +1,6 @@
 ---
 name: cross-agent
-description: Run Claude Code and Codex together on one repo — shared instructions, a shared decision log, the three handoff patterns (cross-agent review, sequential plan→implement, parallel race), and eight failure modes with fixes. Covers why agent memory is private and asymmetric, and why anything that must hold belongs in a test rather than an instruction. Use when setting up two agents on a project, dispatching work to a second agent, or reviewing a diff a different agent wrote.
+description: Run Claude Code and Codex together on one repo or every repo on a machine — installer and checker for shared instructions and skills, a shared decision log, the three handoff patterns (cross-agent review, sequential plan→implement, parallel race), and eight failure modes with fixes. Covers why agent memory is private and asymmetric, and why anything that must hold belongs in a test rather than an instruction. Use when setting up two agents on a project, dispatching work to a second agent, or reviewing a diff a different agent wrote.
 ---
 
 # Working with a second agent
@@ -22,21 +22,55 @@ Two rules carry most of the value:
 Keep every piece of human-authored instruction in exactly one place. Vendor directories hold
 thin adapters, nothing else.
 
-| What | Canonical | Adapter |
+| What | Canonical (Codex reads it) | Claude Code adapter |
 |---|---|---|
-| Instructions | `AGENTS.md` (repo root) | `CLAUDE.md` containing one line: `@AGENTS.md` |
-| Skills | `.agents/skills/<name>/` | `.claude/skills/<name>` — a symlink to `../../.agents/skills/<name>` |
-| MCP servers | `.mcp.json` (repo root) | `.codex/config.toml` `[mcp_servers]` mirror |
+| Project instructions | `AGENTS.md` | `CLAUDE.md`: `@AGENTS.md`, then Claude-only content |
+| Project skills | `.agents/skills/<name>/` | `.claude/skills/<name>` → symlink to `../../.agents/skills/<name>` |
+| Project MCP servers | `.codex/config.toml` `[mcp_servers]` | `.mcp.json`, same server names |
+| User skills | `~/.agents/skills/<name>/` | `~/.claude/skills/<name>` → symlink |
+| User rules | `~/.codex/AGENTS.md`, generated | `~/.claude/rules/` is the source |
 
-Codex and Copilot read `AGENTS.md` and `.agents/skills/` natively. Claude Code reads
-`CLAUDE.md` and `.claude/skills/`. The adapters make one source serve all three.
+### Set it up
+
+`install.py` sits next to this file: `.agents/skills/cross-agent/` in a checkout of this repo,
+`~/.agents/skills/cross-agent/` once installed.
+
+```bash
+python3 install.py --system                  # once per machine: every project, now and later
+python3 install.py path/to/repo ...          # each existing repo that has instructions
+python3 install.py --vendor path/to/repo     # also commit the skill, for teammates
+python3 install.py --local path/to/clone     # upstream clone: never touches tracked files
+```
+
+`--system` installs this skill for both agents, writes a shared rule into `~/.claude/rules/`,
+generates `~/.codex/AGENTS.md` from your Claude rules, and adds a session-start hook to both
+agents. The hook regenerates the Codex copy when your rules change and, in any project whose
+shared config is broken, tells the agent what is wrong and the command that fixes it. New
+projects are covered without a step: the global rule says where instructions go, and the
+hook catches a `CLAUDE.md` that drifts from it. Codex asks you to approve a new hook once.
+
+The per-repo install never deletes content. `CLAUDE.md` is **split by audience**, section by
+section: shared `## ` sections move to `AGENTS.md` verbatim. Two kinds stay below the import:
+
+- **Claude-only:** `## Skill routing`, `## GBrain Search Guidance` — features Codex lacks.
+- **Tool-parsed:** `## Testing`, `## Deploy Configuration`, `## Health Stack` — gstack's `/ship`,
+  `/land-and-deploy` and `/health` grep `CLAUDE.md` for these headings, so moving them breaks
+  the tool. They are knowledge Codex needs, so `AGENTS.md` lists them under
+  `## Kept in CLAUDE.md` instead of copying them. A copy would drift.
+
+Every other section is treated as shared; if one was really Claude-only, move it back below
+the import afterwards. Moving a token `AGENTS.md` into place while the knowledge stays in
+`CLAUDE.md` gives the other agent nothing. Migration runs once: a repo where Claude already
+imports `AGENTS.md` is never rewritten. Claude-only project skills move to `.agents/skills/`
+with `git mv`, so history follows, and get symlinked back.
 
 ### The import is not optional, and its failure is silent
 
-Claude Code *can* read `AGENTS.md` directly, but **only when no `CLAUDE.md` exists in the
-working directory or above it.** If the repo has a `CLAUDE.md` — most do — then `AGENTS.md`
-is ignored unless that file imports it. Direct reading also needs a recent version; the
-import works regardless, which is why it is the layout above.
+Claude Code reads `AGENTS.md` directly **only when no `CLAUDE.md` or `CLAUDE.local.md` exists
+in the working directory or above it**, and only on recent versions. Most repos have one, so
+`AGENTS.md` is ignored unless that file imports it. A `CLAUDE.md` that *tells* Claude to read
+`AGENTS.md` is not an import; Claude opens it only if it decides to. A symlink
+`CLAUDE.md → AGENTS.md` also works, except on Windows checkouts without `core.symlinks`.
 
 **The failure mode is the dangerous part.** If the import line is deleted, renamed, or
 wrapped in backticks, Claude loads `CLAUDE.md` alone and quietly loses every shared
@@ -52,31 +86,29 @@ body = re.sub(r"`[^`\n]*`", "", re.sub(r"```.*?```", "", text, flags=re.S))
 assert re.search(r"^@AGENTS\.md\s*$", body, flags=re.M)
 ```
 
-`check_shared_config.py` next to this file runs that assertion plus the other silent
-breakages: a skill stub instead of a symlink, an absolute symlink, an `AGENTS.override.md`
-(Codex reads it instead of `AGENTS.md`; Claude does not), an `AGENTS.md` over Codex's 32 KiB
-read limit, and shared files that `.gitignore` keeps out of clones. Run it from the repo root,
-in CI or a test. Add `--live` to ask the real `claude` and `codex` what they actually loaded.
+`check_shared_config.py` next to this file runs that and every other silent breakage below.
+Run it in CI or a test; `--live` asks the real `claude` and `codex` what they loaded.
 
-### A skill stub does not import
+### Breakages that load fine and are wrong
 
-`@path` expands in `CLAUDE.md` and `AGENTS.md`, **not in `SKILL.md`**. A Claude skill stub
-whose body is `@../../../.agents/skills/<name>/SKILL.md` loads as that literal line: Claude
-gets the frontmatter and a path, and has to decide on its own to open it. Its description is
-also a second copy that drifts from the canonical one. Symlink the skill directory instead;
-Claude Code follows symlinked project skills, and there is one file to edit. On Windows,
-clone with `core.symlinks` enabled or the link checks out as a one-line text file.
+| Breakage | What happens |
+|---|---|
+| `CLAUDE.md` without a real `@AGENTS.md` import | Claude never sees the shared instructions |
+| `pkg/CLAUDE.md` beside `pkg/AGENTS.md`, no import | Claude skips that directory's `AGENTS.md` |
+| `AGENTS.override.md` anywhere | Codex reads it *instead of* that directory's `AGENTS.md`; Claude does not |
+| `AGENTS.md` over 32 KiB | Codex stops reading at `project_doc_max_bytes` |
+| A skill only in `.claude/skills/` | Codex cannot see it |
+| A skill adapter that is a stub with `@path` | Claude gets a bare path: `@` does not expand in `SKILL.md` |
+| An absolute skill symlink | Works on your machine, broken in every clone |
+| Shared files matched by `.gitignore` | Clones do not get them |
+| MCP server names differ between `.mcp.json` and `.codex/config.toml` | One agent lacks a tool |
+| `.codex/` in a project Codex does not trust | Codex skips its config, MCP servers and hooks |
 
-**Split by audience, not by convenience.** If your `CLAUDE.md` already holds real project
-knowledge, moving a token file into `AGENTS.md` and leaving the content behind gives the
-other agent nothing. Shared knowledge goes in `AGENTS.md`; only what has no counterpart in
-the other tool — slash-command routing, Claude-specific subagents — stays in the adapter.
+**Upstream clones:** do not edit someone else's tracked `CLAUDE.md`. `--local` puts the
+import in `CLAUDE.local.md` and excludes it in `.git/info/exclude`; Claude loads both files.
 
 **Stays tool-specific and cannot be shared:** subagent definitions, hooks, path-scoped rules,
 permission settings. Do not fight this — reference the shared instructions from inside them.
-
-`install.sh` in this repo writes the adapters into a target repo without clobbering existing
-content.
 
 ---
 
@@ -86,8 +118,9 @@ Sharing instructions is the easy half. **Decisions are the half that rots.**
 
 Claude Code accumulates durable state across sessions — auto memory, and whatever your
 tooling logs. Codex's `memories` feature is off by default, so a typical `codex exec` starts
-cold with only the files in the repo. Turned on or not, neither can read the other's store. So a decision recorded in one agent's memory is one the
-other will unknowingly relitigate or contradict.
+cold with only the files in the repo. Turned on or not, neither can read the other's store.
+So a decision recorded in one agent's memory is one the other will unknowingly relitigate or
+contradict.
 
 In the project these notes come from, **20 logged decisions sat outside the repo** where the
 second agent could not see them. The sharpest example was a memory file recording *how to
@@ -118,7 +151,7 @@ and you. Decisions worth keeping become assertions:
 | This package stays framework-free | a test that imports it and fails on the dependency |
 | The public page serves X, never Y | a test asserting the served content |
 | Colour lives in tokens, not literals | a test scanning for raw hex outside the token block |
-| The shared instructions are actually loaded | the import test above |
+| The shared instructions are actually loaded | `check_shared_config.py` |
 
 A hook can enforce more for one vendor, but a test is the only mechanism that binds every
 agent and every human without configuration on either side.
@@ -250,6 +283,13 @@ codex exec --sandbox workspace-write "$(cat brief.md)" < /dev/null > run.log 2>&
 ```
 
 `< /dev/null` matters — without stdin closed, the agent may wait for input that never comes.
+
+**Capture the reviewer's answer, not its transcript.** `-o review.md` writes only the final
+message; `--ephemeral` keeps a one-off review out of Codex's session history.
+
+```bash
+codex exec --sandbox read-only --ephemeral -o review.md "$(cat review-brief.md)" < /dev/null
+```
 
 **Sandbox flags set the role.**
 

@@ -9,33 +9,45 @@ has no stake in it.** Everything else is logistics around protecting that proper
 ## Install
 
 ```bash
-git clone https://github.com/xuyang06/cross-agent.git
-cd cross-agent && ./install.sh /path/to/your/repo
+git clone https://github.com/xuyang06/cross-agent.git && cd cross-agent
+I=.agents/skills/cross-agent/install.py
+
+python3 $I --system                # once per machine: every project, now and later
+python3 $I ~/code/repo-a ~/code/repo-b      # existing repos that have instructions
+python3 $I --local ~/code/upstream-clone    # someone else's repo: untracked files only
 ```
 
-Idempotent and non-destructive — it never overwrites an existing `AGENTS.md` or `CLAUDE.md`,
-and tells you what it skipped. It ends by running the config check, and exits non-zero if
-either agent would miss the shared files.
+`--system` installs the skill for both agents (`~/.agents/skills`, linked from
+`~/.claude/skills`), generates `~/.codex/AGENTS.md` from your `~/.claude/rules`, and adds a
+session-start hook to both agents. The hook keeps that copy current and flags any project
+whose shared config is broken, with the command that fixes it. Codex asks you to approve the
+hook once.
 
-Check any repo, existing or new, at any time:
+The per-repo install never deletes content. `CLAUDE.md` is split by audience: shared sections
+move to `AGENTS.md` word for word; skill routing and the sections gstack parses in `CLAUDE.md`
+by heading (Testing, Deploy Configuration, Health Stack) stay there, and `AGENTS.md` points
+Codex at the parsed ones. Claude-only project skills move to `.agents/skills/` with `git mv` and are
+symlinked back. Add `--vendor` to commit the skill into the repo for teammates.
+
+Check any repo at any time, or run the tests:
 
 ```bash
-python3 .agents/skills/cross-agent/check_shared_config.py          # static, offline
-python3 .agents/skills/cross-agent/check_shared_config.py --live   # asks claude and codex
+python3 .agents/skills/cross-agent/check_shared_config.py ~/code/*/     # static, offline
+python3 .agents/skills/cross-agent/check_shared_config.py --live .      # asks claude and codex
+python3 -m unittest discover tests                                      # LIVE=1 for the live test
 ```
 
 ## What it sets up
 
 One canonical source, thin vendor adapters:
 
-| What | Canonical | Adapter |
+| What | Canonical (Codex reads it) | Claude Code adapter |
 |---|---|---|
-| Instructions | `AGENTS.md` | `CLAUDE.md` → one line, `@AGENTS.md` |
-| Skills | `.agents/skills/<name>/` | `.claude/skills/<name>` → symlink |
-| MCP servers | `.mcp.json` | `.codex/config.toml` `[mcp_servers]` |
-
-Codex and Copilot read `AGENTS.md` and `.agents/` natively; Claude Code reads `CLAUDE.md` and
-`.claude/`. Human-authored content lives in exactly one place.
+| Project instructions | `AGENTS.md` | `CLAUDE.md`: `@AGENTS.md`, then Claude-only content |
+| Project skills | `.agents/skills/<name>/` | `.claude/skills/<name>` → symlink |
+| Project MCP servers | `.codex/config.toml` `[mcp_servers]` | `.mcp.json`, same names |
+| User skills | `~/.agents/skills/<name>/` | `~/.claude/skills/<name>` → symlink |
+| User rules | `~/.codex/AGENTS.md`, generated | `~/.claude/rules/` is the source |
 
 This repo is laid out the same way, so it demonstrates what it documents.
 

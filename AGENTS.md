@@ -13,6 +13,8 @@ adapters in `.claude/`. If you change the skill, change `.agents/skills/cross-ag
 `.claude/skills/cross-agent` is a symlink to it and should stay one — Claude does not expand
 `@` imports inside `SKILL.md`, so a stub loads as a bare path.
 
+Durable decisions about this repo are in `DECISIONS.md`; read it before changing the layout.
+
 Before committing, run `python3 -m unittest discover tests` (add `LIVE=1` to also ask the real
 `claude` and `codex` CLIs what they load).
 
