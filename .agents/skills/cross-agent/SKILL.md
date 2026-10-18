@@ -103,6 +103,7 @@ Run it in CI or a test; `--live` asks the real `claude` and `codex` what they lo
 | Shared files matched by `.gitignore` | Clones do not get them |
 | MCP server names differ between `.mcp.json` and `.codex/config.toml` | One agent lacks a tool |
 | `.codex/` in a project Codex does not trust | Codex skips its config, MCP servers and hooks |
+| A sync service renames a new symlink to `name 2` | Claude loses that skill. Seen with iCloud's Desktop & Documents sync, seconds after install |
 
 **Upstream clones:** do not edit someone else's tracked `CLAUDE.md`. `--local` puts the
 import in `CLAUDE.local.md` and excludes it in `.git/info/exclude`; Claude loads both files.
