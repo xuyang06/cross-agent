@@ -241,12 +241,71 @@ class Hook(Base):
         (self.home / ".claude/skills/solo/SKILL.md").write_text("x")
         self.assertEqual(self.hook(self.home), "")
 
-    def test_reports_from_subdirectory(self):
-        self.write("CLAUDE.md", TESTING)
+    def commit_as(self, email):
+        self.git("add", "-A")
+        self.git("-c", "user.name=u", "-c", f"user.email={email}", "commit", "-qm", "c")
+
+    def test_wires_a_new_project_from_a_subdirectory(self):
+        # Claude's /init writes CLAUDE.md; the next session start shares it with Codex.
+        self.write("CLAUDE.md", ARCH + "\n" + ROUTING)
         (self.repo / "src").mkdir()
         out = self.hook(self.repo / "src")
+        self.assertIn("wired this project", out)
+        self.assertTrue((self.repo / "AGENTS.md").is_file(), out)
+        self.assertIn("One service, one database.", self.read("AGENTS.md"))
+        self.assertTrue(self.read("CLAUDE.md").startswith("@AGENTS.md\n"))
+        self.assertIn("Skill routing", self.read("CLAUDE.md"))
+        self.assert_ok(self.check())
+
+    def test_wires_skills_in_your_own_repo(self):
+        self.git("config", "user.email", "me@me")
+        self.write("AGENTS.md", "# A\n\n" + ARCH)
+        self.write("CLAUDE.md", "@AGENTS.md\n")
+        self.write(".claude/skills/solo/SKILL.md", "---\nname: solo\n---\nbody\n")
+        self.commit_as("me@me")
+        self.assertIn("wired this project", self.hook(self.repo))
+        self.assertEqual(self.read(".agents/skills/solo/SKILL.md"), "---\nname: solo\n---\nbody\n")
+        self.assertTrue((self.repo / ".claude/skills/solo").is_symlink())
+        self.assert_ok(self.check())
+
+    def test_only_untracked_files_in_someone_elses_repo(self):
+        self.git("config", "user.email", "me@me")
+        self.write("AGENTS.md", "# Upstream\n\n" + ARCH)
+        self.commit_as("upstream@example.com")
+        self.assertIn("wired this project", self.hook(self.repo))
+        self.assertFalse((self.repo / "CLAUDE.md").exists(), "a tracked-file change in someone else's repo")
+        self.assertTrue((self.repo / "CLAUDE.local.md").is_file())
+        self.assertTrue(self.read("CLAUDE.local.md").startswith("@AGENTS.md"))
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+        self.assert_ok(self.check())
+
+    def test_does_not_claim_a_fix_it_could_not_make(self):
+        self.git("config", "user.email", "me@me")
+        self.write("CLAUDE.md", ARCH)
+        self.commit_as("upstream@example.com")
+        out = self.hook(self.repo)
+        self.assertNotIn("wired this project", out)
         self.assertIn("AGENTS.md missing", out)
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+
+    def test_leaves_uncommitted_edits_alone(self):
+        self.git("config", "user.email", "me@me")
+        self.write("CLAUDE.md", ARCH)
+        self.commit_as("me@me")
+        self.write("CLAUDE.md", ARCH + "\nwork in progress\n")
+        out = self.hook(self.repo)
+        self.assertNotIn("wired this project", out)
+        self.assertIn("uncommitted changes in CLAUDE.md", out)
         self.assertIn("install.py", out)
+        self.assertEqual(self.read("CLAUDE.md"), ARCH + "\nwork in progress\n")
+        self.assertFalse((self.repo / "AGENTS.md").exists())
+
+    def test_reports_what_it_cannot_fix(self):
+        self.install()
+        self.write("AGENTS.override.md", "# Override\n")
+        out = self.hook(self.repo)
+        self.assertNotIn("wired this project", out)
+        self.assertIn("AGENTS.override.md exists", out)
 
 
 class System(Base):

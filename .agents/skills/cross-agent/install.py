@@ -42,8 +42,8 @@ private config. Keep what they need in files both read:
   content (skill routing). Never put project knowledge only in `CLAUDE.md`.
 - Project skills live in `.agents/skills/<name>/`; `.claude/skills/<name>` is a symlink to it.
 - Durable decisions go in `DECISIONS.md` in the repo, not in agent memory.
-- When a session-start note says the shared config is broken, fix it with
-  `python3 ~/.agents/skills/cross-agent/install.py <repo>` and review the diff.
+- A session-start hook wires broken projects itself. When it says it changed files, mention
+  it so they get reviewed and committed. When it says it could not, fix what it names.
 """
 HOOK = ('python3 "$HOME/.agents/skills/cross-agent/install.py" --sync-global --quiet; '
         'python3 "$HOME/.agents/skills/cross-agent/check_shared_config.py" --hook')

@@ -41,8 +41,16 @@ Four pieces do the work:
    writes a short rule to `~/.claude/rules/` telling both agents where things go, and generates
    `~/.codex/AGENTS.md` from your `~/.claude/rules`.
 3. **A session-start hook in both agents** regenerates `~/.codex/AGENTS.md` when your rules
-   change and runs the checker. In a project whose wiring has broken, it tells the agent what
-   is wrong and which command fixes it. Elsewhere it is silent (about 0.2 s).
+   change, then checks the project. If the wiring is broken, it runs step 1 itself and tells
+   the agent what it changed. It never commits. Three cases are handled conservatively:
+   - In a repo you have never committed to, it changes only untracked files (an excluded
+     `CLAUDE.local.md`), so someone else's history stays clean.
+   - If the files it would touch have uncommitted edits, it leaves them alone and reports
+     instead, so its changes never mix with your work in progress.
+   - Problems it cannot fix (an override file, mismatched MCP servers, an untrusted `.codex/`)
+     are reported with the reason.
+
+   In a healthy project it is silent and takes about 0.2 s.
 4. **`check_shared_config.py` catches what loads without error but is still wrong:** a missing
    import, an `AGENTS.override.md` that shadows the real file, a skill only Claude can see, an
    ignored or oversized `AGENTS.md`, mismatched MCP servers, an untrusted `.codex/`. With
@@ -64,14 +72,17 @@ git clone https://github.com/xuyang06/cross-agent.git && cd cross-agent
 I=.agents/skills/cross-agent/install.py
 
 python3 $I --system                         # 1. once per machine
-python3 $I ~/code/repo-a ~/code/repo-b      # 2. each existing repo that has a CLAUDE.md
+python3 $I ~/code/repo-a ~/code/repo-b      # 2. optional: wire existing repos now
 python3 $I --local ~/code/upstream-clone    #    someone else's repo: untracked files only
 ```
 
+Step 2 is optional. The hook wires each project the first time you open a session in it; run
+it yourself to do several repos at once or to see the result before a session starts.
+
 Then:
 
-3. **Review and commit** each migrated repo (`git diff`, `git status`). Nothing is committed
-   for you.
+3. **Review and commit** each wired repo (`git status`, `git diff`), whether you ran step 2
+   or the hook did it. Nothing is committed for you.
 4. **Approve the hook in Codex** the first time it asks. Codex makes you review a new hook once
    before running it.
 5. **Check it took:**
@@ -85,14 +96,29 @@ gets a `.cross-agent.bak` backup first.
 
 ## Day to day
 
-- **Write project knowledge in `AGENTS.md`.** Keep `CLAUDE.md` to `@AGENTS.md` plus skill
-  routing.
-- **Put new project skills in `.agents/skills/<name>/`**, then
-  `ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
-- **Keep editing `~/.claude/rules/`.** Codex gets the change at its next session start.
-- **Log decisions in `DECISIONS.md`**, not in either agent's memory.
-- **If a session opens with a cross-agent warning,** run the command it prints and review the
-  diff.
+**Automatic.** Nothing to do:
+
+- **Edits to `~/.claude/rules/`** reach Codex at the next session start in either agent.
+  `agents.md`, `hooks.md` and `performance.md` are Claude-only and not copied.
+- **A new project, or one where Claude's `/init` wrote a `CLAUDE.md`,** is wired at its next
+  session start: shared sections move to `AGENTS.md` and `CLAUDE.md` imports it.
+- **A skill created in `.claude/skills/`** moves to `.agents/skills/` at the next session start
+  and is symlinked back, so Codex sees it too.
+
+**Your part:**
+
+- **Commit what the hook changed.** It tells the agent what it did; nothing is committed for
+  you.
+- **When a session opens with "see different config",** the hook could not fix it alone: it
+  left uncommitted edits untouched, or the problem needs a decision (an override file,
+  mismatched MCP servers). Run the command it prints, or fix what it names.
+
+**Told to both agents, not enforced.** The global rule asks them to do these, but nothing
+checks:
+
+- **New project knowledge goes in `AGENTS.md`.** A section added only to `CLAUDE.md` after the
+  first migration stays there, where Codex never reads it.
+- **Decisions go in `DECISIONS.md`.** Claude's own memory is still on and may be used instead.
 
 Check any repo, or run this repo's tests:
 

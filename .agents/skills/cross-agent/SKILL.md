@@ -44,10 +44,11 @@ python3 install.py --local path/to/clone     # upstream clone: never touches tra
 
 `--system` installs this skill for both agents, writes a shared rule into `~/.claude/rules/`,
 generates `~/.codex/AGENTS.md` from your Claude rules, and adds a session-start hook to both
-agents. The hook regenerates the Codex copy when your rules change and, in any project whose
-shared config is broken, tells the agent what is wrong and the command that fixes it. New
-projects are covered without a step: the global rule says where instructions go, and the
-hook catches a `CLAUDE.md` that drifts from it. Codex asks you to approve a new hook once.
+agents. The hook regenerates the Codex copy when your rules change. In any project whose
+shared config is broken, it runs the per-repo install itself and tells the agent what it
+changed; it never commits. In a repo you have never committed to, it changes only untracked
+files. Where the files it would touch have uncommitted edits, it reports instead of
+editing. New projects need no step. Codex asks you to approve a new hook once.
 
 The per-repo install never deletes content. `CLAUDE.md` is **split by audience**, section by
 section: shared `## ` sections move to `AGENTS.md` verbatim. Two kinds stay below the import:

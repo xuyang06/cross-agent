@@ -3,8 +3,9 @@
 
     check_shared_config.py [repo ...]          static, offline (default: cwd)
     check_shared_config.py --live [repo ...]   also ask the real claude and codex CLIs
-    check_shared_config.py --hook              session-start hook: report problems, never fail
+    check_shared_config.py --hook              session-start hook: wire the project if safe, never fail
 """
+import fcntl
 import json
 import os
 import re
@@ -18,6 +19,10 @@ CODEX_DEFAULT_DOC_MAX_BYTES = 32 * 1024  # Codex stops adding instruction files 
 CLAUDE_FILES = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
 FIX = "python3 ~/.agents/skills/cross-agent/install.py"
 GIT_TIMEOUT = 10
+# Problems install.py fixes, and the files it touches doing so (the hook needs them clean).
+FIXABLE = ("AGENTS.md missing", "no CLAUDE.md or CLAUDE.local.md imports", "Claude cannot see skill",
+           "Codex cannot see skill")
+WIRED_PATHS = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".claude/skills", ".agents/skills")
 # CLAUDE.md sections that stay there. Claude-only ones drive features Codex lacks. Tool-parsed
 # ones are read or rewritten in CLAUDE.md by heading (gstack's /ship, /land-and-deploy,
 # /health), so moving them breaks the tool; AGENTS.md points Codex at them instead.
@@ -271,8 +276,29 @@ def live_problems(repo: Path) -> list[str]:
     return found
 
 
+def own_repo(repo: Path) -> bool:
+    """A repo you never committed to is someone else's: only untracked files change there."""
+    if git(repo, "rev-parse", "-q", "--verify", "HEAD").returncode != 0:
+        return True  # no commits yet: a new project
+    email = git(repo, "config", "user.email").stdout.strip()
+    # ponytail: scans history for your email; a git timeout on a huge repo falls back to --local
+    return bool(email) and bool(git(repo, "log", "-1", "--format=%H", "-F", f"--author=<{email}>").stdout.strip())
+
+
+def wire(repo: Path) -> list[str]:
+    """Run install.py on the project, unless that would mix with uncommitted edits. Returns what it did."""
+    dirty = git(repo, "status", "--porcelain", "--untracked-files=no", "--", *WIRED_PATHS).stdout.splitlines()
+    if dirty:
+        return [f"left alone: uncommitted changes in {', '.join(line[3:] for line in dirty)}"]
+    cmd = [sys.executable, str(Path(__file__).with_name("install.py")), str(repo)]
+    if not own_repo(repo):
+        cmd.insert(2, "--local")
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout.splitlines()[1:]
+    return [line.strip() for line in out if not line.strip().startswith(("FAIL ", "ok:", "fix the FAIL"))]
+
+
 def hook(cwd: Path) -> None:
-    """Session start: tell the agent when this project's shared config is broken. Never fail."""
+    """Session start: wire a project whose shared config is broken, or say why not. Never fail."""
     top = git(cwd, "rev-parse", "--show-toplevel").stdout.strip()
     repo = Path(top) if top else cwd
     if repo.resolve() == Path.home().resolve():
@@ -280,10 +306,24 @@ def hook(cwd: Path) -> None:
     markers = ("AGENTS.md", "CLAUDE.md", ".claude/skills", ".agents/skills", ".mcp.json")
     if not any((repo / m).exists() for m in markers):
         return  # no project instructions yet; the global ones cover both agents
-    found = problems(repo)
+    found, did, fixed = problems(repo), [], []
+    if top and any(p.startswith(FIXABLE) for p in found):
+        lock = Path(git(repo, "rev-parse", "--git-path", "cross-agent.lock").stdout.strip())
+        with open(lock if lock.is_absolute() else repo / lock, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)  # Claude and Codex starting together run this twice
+            found = problems(repo)
+            if any(p.startswith(FIXABLE) for p in found):
+                before, did = found, wire(repo)
+                found = problems(repo)
+                fixed = [p for p in before if p not in found]
+    skipped = [line for line in did if line.startswith("left alone")]
+    if fixed:
+        print("cross-agent: wired this project so Claude Code and Codex share its config. "
+              "Nothing is committed; review with `git status` and `git diff`:")
+        print("\n".join(f"- {line}" for line in did))
     if found:
         print("cross-agent: Claude Code and Codex see different config in this project:")
-        print("\n".join(f"- {p}" for p in found))
+        print("\n".join(f"- {p}" for p in found + skipped))
         print(f"Fix with `{FIX} {repo}` and review the diff (add --local for an upstream clone).")
 
 
