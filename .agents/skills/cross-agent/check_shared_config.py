@@ -29,7 +29,7 @@ POINTER_HEADING = "## Kept in CLAUDE.md"
 PROBE = (
     "Do not use any tools. Reply with exactly three lines and nothing else:\n"
     "GLOBAL=<the first markdown heading of your user-level/global instructions, or NONE>\n"
-    "PROJECT=<the first markdown heading of the instructions loaded from {agents_md}, or NONE>\n"
+    "PROJECT=<the last markdown heading (any level) of the instructions loaded from {agents_md}, or NONE>\n"
     "SKILL=<YES if a skill named cross-agent is in your available skills, else NO>"
 )
 
@@ -237,12 +237,16 @@ def parse_probe(reply: str) -> dict[str, str]:
 
 
 def probe_problems(agent: str, reply: str, repo: Path) -> list[str]:
-    heading = next((l for l in (repo / "AGENTS.md").read_text().splitlines() if l.startswith("# ")), None)
+    # The last heading, not the first: Codex appends the project file after the global one,
+    # and asked for "the first heading" it reports the global file's.
+    lines = (repo / "AGENTS.md").read_text().splitlines()
+    heading = next((l for l, fenced in reversed(list(zip(lines, fence_mask(lines))))
+                    if not fenced and re.match(r"#{1,6} ", l)), None)
     if heading is None:
-        return ["AGENTS.md has no '# ' heading for the live probe to ask about"]
+        return ["AGENTS.md has no heading for the live probe to ask about"]
     got = parse_probe(reply)
     found = []
-    if got.get("PROJECT", "").casefold() != heading[2:].strip().casefold():
+    if got.get("PROJECT", "").casefold() != heading.lstrip("#").strip().casefold():
         found.append(f"{agent} did not load AGENTS.md (said PROJECT={got.get('PROJECT')!r})")
     expect_skill = (repo / ".agents/skills/cross-agent").is_dir() or global_skill().is_dir()
     if expect_skill and got.get("SKILL", "").upper() != "YES":

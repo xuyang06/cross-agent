@@ -521,6 +521,20 @@ class ReviewFindings(Base):
         self.assertFalse((self.home / ".claude/settings.json").exists())
 
 
+class LiveProbe(Base):
+    def test_expects_the_last_heading_outside_fences(self):
+        # Codex prepends the global file, so the first heading it sees is never the project's.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("check", CHECK)
+        check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check)
+        self.write("AGENTS.md", "# Agent instructions\n\n" + ARCH + "\n```\n## Not a heading\n```\n")
+        reply = "GLOBAL=Global instructions\nPROJECT={}\nSKILL=YES\n"
+        self.assertEqual(check.probe_problems("codex", reply.format("`## Architecture`"), self.repo), [])
+        for wrong in ("Agent instructions", "Not a heading", "Global instructions"):
+            self.assertEqual(len(check.probe_problems("codex", reply.format(wrong), self.repo)), 1, wrong)
+
+
 @unittest.skipUnless(os.environ.get("LIVE"), "set LIVE=1 to ask the real claude and codex CLIs")
 class Live(Base):
     def test_both_agents_load_it(self):
